@@ -17,23 +17,70 @@ export default function ChartRenderer({ config }: Props) {
   const formattedData = useMemo(() => {
     if (!data || data.length === 0) return [];
     
-    // Group and aggregate data if pie or if it's explicitly aggregated (like sum/avg on Card)
-    if (config.type === 'Pie' && config.nameField && config.valueField) {
-      const aggregated: Record<string, number> = {};
-      data.forEach(row => {
-        const key = row[config.nameField!] || 'Unknown';
-        const val = Number(row[config.valueField!]) || 0;
-        aggregated[key] = (aggregated[key] || 0) + val;
-      });
-      return Object.entries(aggregated).map(([name, value]) => ({ name, value }));
+    if (config.type === 'Table') return data;
+    if (config.type === 'Card') return data;
+
+    if (config.type === 'Scatter') {
+      return data.map(item => ({
+        ...item,
+        [config.xAxisField || 'x']: Number(item[config.xAxisField!]) || 0,
+        [config.yAxisField || 'y']: Number(item[config.yAxisField!]) || 0,
+      }));
     }
 
-    // For other charts, parse numbers
-    return data.map(item => {
-      const obj = { ...item };
-      if (config.yAxisField) obj[config.yAxisField] = Number(obj[config.yAxisField]) || 0;
-      return obj;
+    // Pie, Bar, Line: Group by category field and aggregate metric field
+    const categoryField = config.type === 'Pie' ? config.nameField : config.xAxisField;
+    const metricField = config.type === 'Pie' ? config.valueField : config.yAxisField;
+    const aggType = config.aggregation || 'sum';
+
+    if (!categoryField) return data;
+
+    const grouped: Record<string, number[]> = {};
+    data.forEach(row => {
+      let key = String(row[categoryField]);
+      if (key === 'null' || key === 'undefined' || key.trim() === '') key = 'Unknown';
+      if (!grouped[key]) grouped[key] = [];
+      
+      let rawVal = metricField ? row[metricField] : null;
+      let val = 0;
+      if (typeof rawVal === 'number') {
+        val = rawVal;
+      } else if (typeof rawVal === 'string') {
+        const parsed = Number(rawVal.replace(/[^0-9.-]+/g, ""));
+        val = isNaN(parsed) ? 0 : parsed;
+      }
+      
+      grouped[key].push(val);
     });
+
+    const result = Object.entries(grouped).map(([name, values]) => {
+      let aggVal = 0;
+      if (aggType === 'count') {
+        aggVal = values.length;
+      } else if (aggType === 'sum') {
+        aggVal = values.reduce((a, b) => a + b, 0);
+      } else if (aggType === 'avg') {
+        aggVal = values.reduce((a, b) => a + b, 0) / (values.length || 1);
+      } else if (aggType === 'max') {
+        aggVal = Math.max(...values);
+      } else if (aggType === 'min') {
+        aggVal = Math.min(...values);
+      }
+
+      if (config.type === 'Pie') {
+        return { name, value: aggVal };
+      } else {
+        return { [categoryField]: name, [metricField!]: aggVal };
+      }
+    });
+
+    // Optionally sort logic: Keep categorical x-axis for Line, sort Bar/Pie
+    if (config.type === 'Pie' || config.type === 'Bar') {
+      const valKey = config.type === 'Pie' ? 'value' : metricField!;
+      result.sort((a: any, b: any) => b[valKey] - a[valKey]);
+    }
+
+    return result.slice(0, 50); // limit to top 50 categories to avoid performance issues
   }, [data, config]);
 
   const cardValue = useMemo(() => {
@@ -42,11 +89,20 @@ export default function ChartRenderer({ config }: Props) {
     if (config.aggregation === 'count') {
       val = data.length;
     } else if (config.yAxisField) {
-      const values = data.map(r => Number(r[config.yAxisField!]) || 0);
+      const values = data.map(row => {
+        let rawVal = row[config.yAxisField!];
+        if (typeof rawVal === 'number') return rawVal;
+        if (typeof rawVal === 'string') {
+          const parsed = Number(rawVal.replace(/[^0-9.-]+/g, ""));
+          return isNaN(parsed) ? 0 : parsed;
+        }
+        return 0;
+      });
+      
       if (config.aggregation === 'sum') val = values.reduce((a, b) => a + b, 0);
-      if (config.aggregation === 'avg') val = values.reduce((a, b) => a + b, 0) / values.length;
-      if (config.aggregation === 'max') val = Math.max(...values);
-      if (config.aggregation === 'min') val = Math.min(...values);
+      else if (config.aggregation === 'avg') val = values.reduce((a, b) => a + b, 0) / (values.length || 1);
+      else if (config.aggregation === 'max') val = Math.max(...values);
+      else if (config.aggregation === 'min') val = Math.min(...values);
     }
     return val;
   }, [data, config]);
@@ -166,11 +222,14 @@ export default function ChartRenderer({ config }: Props) {
               <tbody className="bg-white divide-y divide-gray-100">
                 {formattedData.slice(0, 50).map((row, i) => (
                   <tr key={i} className="hover:bg-gray-50/50 transition-colors">
-                    {Object.values(row).map((val: any, j) => (
-                      <td key={j} className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 font-medium font-mono">
-                        {typeof val === 'number' ? val.toLocaleString() : String(val)}
-                      </td>
-                    ))}
+                    {Object.keys(formattedData[0] || {}).map((col, j) => {
+                      const val = row[col];
+                      return (
+                        <td key={j} className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 font-medium font-mono">
+                          {typeof val === 'number' && !isNaN(val) ? val.toLocaleString() : String(val ?? '')}
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>

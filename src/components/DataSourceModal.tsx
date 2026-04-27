@@ -125,7 +125,7 @@ export default function DataSourceModal({ onClose }: Props) {
                   Connect
                 </button>
               </div>
-              <p className="text-xs text-gray-500">Note: URL must output directly to CSV format.</p>
+              <p className="text-xs text-gray-500">Note: For Google Sheets, make sure "General access" is set to "Anyone with the link".</p>
             </div>
           )}
 

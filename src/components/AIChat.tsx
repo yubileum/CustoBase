@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../lib/DataContext';
 import { GoogleGenAI, Type, FunctionDeclaration } from '@google/genai';
-import { Sparkles, Send, Bot, User, Loader2 } from 'lucide-react';
+import { Sparkles, Send, Bot, User, Loader2, X, MessageSquare } from 'lucide-react';
 
 interface ChatMessage {
   id: string;
@@ -16,6 +16,7 @@ export default function AIChat() {
   ]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -175,67 +176,84 @@ export default function AIChat() {
   };
 
   return (
-    <div className="w-80 bg-white border-l border-gray-200 h-full flex flex-col">
-      <div className="p-4 border-b border-gray-100 flex items-center gap-2">
-        <Sparkles className="w-5 h-5 text-indigo-600" />
-        <span className="font-semibold text-gray-800">AI Assistant</span>
-      </div>
+    <>
+      <button
+        onClick={() => setIsOpen(true)}
+        className={`absolute bottom-6 right-6 p-4 bg-indigo-600 text-white rounded-full shadow-lg hover:bg-indigo-700 transition-all hover:scale-105 z-40 flex items-center justify-center ${isOpen ? 'scale-0 opacity-0 pointer-events-none' : 'scale-100 opacity-100'}`}
+      >
+        <MessageSquare className="w-6 h-6" />
+      </button>
 
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 custom-scrollbar">
-        {!data.length && (
-          <div className="text-sm text-amber-600 bg-amber-50 p-3 rounded-md border border-amber-200">
-            Please connect a data source first so I can help you build charts!
+      <div className={`absolute bottom-6 right-6 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col z-50 transition-all duration-300 transform origin-bottom-right ${isOpen ? 'scale-100 opacity-100' : 'scale-95 opacity-0 pointer-events-none'}`} style={{ height: '600px', maxHeight: 'calc(100vh - 48px)' }}>
+        <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-white rounded-t-2xl shrink-0">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-indigo-600" />
+            <span className="font-semibold text-gray-800">AI Assistant</span>
           </div>
-        )}
-        {messages.map(msg => (
-          <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-              msg.role === 'user' ? 'bg-blue-100 text-blue-600' : 'bg-indigo-100 text-indigo-600'
-            }`}>
-              {msg.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-            </div>
-            <div className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm ${
-              msg.role === 'user' 
-                ? 'bg-blue-600 text-white rounded-tr-sm' 
-                : 'bg-gray-100 text-gray-800 rounded-tl-sm'
-            }`}>
-              {msg.text}
-            </div>
-          </div>
-        ))}
-        {isTyping && (
-          <div className="flex gap-3">
-            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-indigo-100 text-indigo-600">
-              <Bot className="w-4 h-4" />
-            </div>
-            <div className="bg-gray-100 px-4 py-2.5 rounded-2xl rounded-tl-sm flex items-center gap-1">
-              <Loader2 className="w-4 h-4 text-gray-500 animate-spin" />
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      <div className="p-4 border-t border-gray-100 bg-white">
-        <div className="relative">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={data.length ? "Ask me to create a chart..." : "Connect data first"}
-            disabled={!data.length || isTyping}
-            className="w-full resize-none rounded-xl border border-gray-300 pr-10 pl-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-50 disabled:bg-gray-50 block max-h-32 min-h-[44px] custom-scrollbar"
-            rows={1}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || !data.length || isTyping}
-            className="absolute right-2 bottom-2 p-1.5 bg-indigo-600 text-white rounded-lg disabled:opacity-50 disabled:bg-gray-300 transition-colors hover:bg-indigo-700"
+          <button 
+            onClick={() => setIsOpen(false)}
+            className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors"
           >
-            <Send className="w-3.5 h-3.5" />
+            <X className="w-5 h-5" />
           </button>
         </div>
+
+        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 custom-scrollbar bg-gray-50/50">
+          {!data.length && (
+            <div className="text-sm text-amber-600 bg-amber-50 p-3 rounded-md border border-amber-200">
+              Please connect a data source first so I can help you build charts!
+            </div>
+          )}
+          {messages.map(msg => (
+            <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                msg.role === 'user' ? 'bg-blue-100 text-blue-600' : 'bg-indigo-100 text-indigo-600'
+              }`}>
+                {msg.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+              </div>
+              <div className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm ${
+                msg.role === 'user' 
+                  ? 'bg-blue-600 text-white rounded-tr-sm' 
+                  : 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm shadow-sm'
+              }`}>
+                {msg.text}
+              </div>
+            </div>
+          ))}
+          {isTyping && (
+            <div className="flex gap-3">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-indigo-100 text-indigo-600">
+                <Bot className="w-4 h-4" />
+              </div>
+              <div className="bg-white border border-gray-200 shadow-sm px-4 py-2.5 rounded-2xl rounded-tl-sm flex items-center gap-1">
+                <Loader2 className="w-4 h-4 text-gray-500 animate-spin" />
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <div className="p-4 border-t border-gray-100 bg-white rounded-b-2xl shrink-0">
+          <div className="relative">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={data.length ? "Ask me to create a chart..." : "Connect data first"}
+              disabled={!data.length || isTyping}
+              className="w-full resize-none rounded-xl border border-gray-300 pr-10 pl-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-50 disabled:bg-gray-50 block max-h-32 min-h-[44px] custom-scrollbar"
+              rows={1}
+            />
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || !data.length || isTyping}
+              className="absolute right-2 bottom-2 p-1.5 bg-indigo-600 text-white rounded-lg disabled:opacity-50 disabled:bg-gray-300 transition-colors hover:bg-indigo-700"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

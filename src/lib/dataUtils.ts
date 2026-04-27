@@ -30,21 +30,40 @@ export const parseExcel = async (file: File): Promise<DataRow[]> => {
 export const fetchPublicCSV = async (url: string): Promise<DataRow[]> => {
   let fetchUrl = url;
   
-  // Transform standard Google Sheets URL to CSV export URL
-  if (url.includes('docs.google.com/spreadsheets')) {
+  if (url.includes('/pub?')) {
+    if (!url.includes('output=csv')) {
+      fetchUrl = url.replace(/pub\?.*/, 'pub?output=csv');
+    }
+  } else if (url.includes('docs.google.com/spreadsheets')) {
     const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
-    if (match && match[1]) {
+    if (match && match[1] && match[1] !== 'e') {
       const gsheetId = match[1];
-      // Check for GID
       const urlParams = new URLSearchParams(url.split('?')[1] || '');
-      const gid = urlParams.get('gid') || '0';
-      fetchUrl = `https://docs.google.com/spreadsheets/d/${gsheetId}/export?format=csv&gid=${gid}`;
+      const gid = urlParams.get('gid');
+      fetchUrl = `https://docs.google.com/spreadsheets/d/${gsheetId}/export?format=csv${gid ? `&gid=${gid}` : ''}`;
+    } else if (url.includes('/e/')) {
+      const eMatch = url.match(/\/e\/([a-zA-Z0-9-_]+)/);
+      if (eMatch && eMatch[1]) {
+        fetchUrl = `https://docs.google.com/spreadsheets/d/e/${eMatch[1]}/pub?output=csv`;
+      }
     }
   }
 
-  const response = await fetch(fetchUrl);
+  const proxyUrl = `/api/proxy-csv?url=${encodeURIComponent(fetchUrl)}`;
+  const response = await fetch(proxyUrl);
   if (!response.ok) {
-    throw new Error(`Failed to fetch data: ${response.status} ${response.statusText}`);
+    let errorText;
+    try {
+      const errorJson = await response.json();
+      errorText = errorJson.error;
+    } catch (e) {
+      errorText = response.statusText;
+    }
+    
+    if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 404) {
+      throw new Error(errorText || `Access Denied (HTTP ${response.status}). Please ensure Google Sheets "General access" is set to "Anyone with the link".`);
+    }
+    throw new Error(errorText || `Failed to fetch data: ${response.status} ${response.statusText}`);
   }
   
   const text = await response.text();
@@ -65,11 +84,14 @@ export const fetchPublicCSV = async (url: string): Promise<DataRow[]> => {
 
 export const extractFields = (data: DataRow[]): string[] => {
   if (!data || data.length === 0) return [];
-  // return all unique keys from the first few rows to be safe
   const keys = new Set<string>();
-  const samples = data.slice(0, 10);
-  samples.forEach(row => {
-    Object.keys(row).forEach(key => keys.add(key));
+  data.forEach(row => {
+    Object.keys(row).forEach(key => {
+      // Don't add empty keys
+      if (key && key.trim() !== '') {
+        keys.add(key);
+      }
+    });
   });
   return Array.from(keys);
 };
