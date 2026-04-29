@@ -141,7 +141,7 @@ Use the provided tools to create or modify charts. When the user mentions a spec
 Respond briefly and confirm what you did.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-1.5-flash',
         contents: message,
         config: {
           systemInstruction,

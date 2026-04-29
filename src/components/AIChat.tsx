@@ -197,7 +197,7 @@ export default function AIChat() {
                 }
               </div>
               <div style={{
-                maxWidth: '78%', padding: '8px 12px', borderRadius: 12, fontSize: 13, lineHeight: 1.5,
+                maxWidth: '78%', padding: '8px 12px', fontSize: 13, lineHeight: 1.5,
                 background: msg.role === 'user' ? 'var(--color-accent)' : 'var(--bg-surface)',
                 color: msg.role === 'user' ? '#fff' : 'var(--text-primary)',
                 border: msg.role === 'user' ? 'none' : '1px solid var(--border-base)',
