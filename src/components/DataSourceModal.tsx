@@ -1,17 +1,10 @@
 import React, { useState } from 'react';
 import { useData, RefreshInterval, TableSource } from '../lib/DataContext';
-import {
-  parseCSV,
-  parseExcelSheet,
-  getExcelSheetNames,
-  fetchSheetCSV,
-  extractFields,
-} from '../lib/dataUtils';
-import { Upload, Link as LinkIcon, Database, X, RefreshCw, Plus, Trash2 } from 'lucide-react';
+import { isExcel365Url, parseCSV, parseExcelSheet, getExcelSheetNames, fetchSheetCSV, extractFields } from '../lib/dataUtils';
+import { Upload, Link as LinkIcon, Database, X, RefreshCw, Plus, Trash2, Table2, ExternalLink } from 'lucide-react';
+import { useToast } from '../lib/ToastContext';
 
-interface Props {
-  onClose: () => void;
-}
+interface Props { onClose: () => void; }
 
 const REFRESH_OPTIONS: { label: string; value: RefreshInterval }[] = [
   { label: 'Manual only', value: 0 },
@@ -22,418 +15,308 @@ const REFRESH_OPTIONS: { label: string; value: RefreshInterval }[] = [
   { label: 'Every 30 minutes', value: 1800 },
 ];
 
-function isGoogleSheetsUrl(url: string): boolean {
-  return url.includes('docs.google.com/spreadsheets');
-}
+type SourceMode = 'upload' | 'google' | 'excel365' | 'csv';
+
+function isGoogleSheetsUrl(url: string) { return url.includes('docs.google.com/spreadsheets'); }
 
 export default function DataSourceModal({ onClose }: Props) {
   const { upsertTable } = useData();
+  const { success, error: toastError } = useToast();
 
-  const [mode, setMode] = useState<'upload' | 'url'>('upload');
+  const [mode, setMode] = useState<SourceMode>('upload');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedInterval, setSelectedInterval] = useState<RefreshInterval>(0);
 
-  // ── URL tab state ────────────────────────────────────────────────────────────
+  // URL states
   const [url, setUrl] = useState('');
-  // Sheet name inputs: each entry is a sheet name string
   const [sheetNames, setSheetNames] = useState<string[]>(['']);
 
-  // ── Upload tab state ─────────────────────────────────────────────────────────
+  // Upload states
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [detectedSheets, setDetectedSheets] = useState<string[]>([]);
   const [selectedSheets, setSelectedSheets] = useState<Set<string>>(new Set());
   const [detectingSheets, setDetectingSheets] = useState(false);
 
-  // ── URL helpers ──────────────────────────────────────────────────────────────
-
-  const addSheetNameInput = () => setSheetNames(prev => [...prev, '']);
-
-  const removeSheetNameInput = (idx: number) => {
-    setSheetNames(prev => {
-      const next = prev.filter((_, i) => i !== idx);
-      return next.length === 0 ? [''] : next;
-    });
-  };
-
-  const updateSheetName = (idx: number, value: string) => {
-    setSheetNames(prev => prev.map((s, i) => (i === idx ? value : s)));
-  };
-
+  // ── URL helpers ───────────────────────────────────────────────────────────
   const handleUrlConnect = async () => {
-    const trimmedUrl = url.trim();
-    if (!trimmedUrl) return;
-    setLoading(true);
-    setError('');
-
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    setLoading(true); setError('');
     try {
-      if (isGoogleSheetsUrl(trimmedUrl)) {
-        // Load each non-empty sheet name as a separate table
+      if (isGoogleSheetsUrl(trimmed)) {
         const nonEmpty = sheetNames.map(s => s.trim()).filter(Boolean);
-
-        // If no sheet names entered, load the default (first) sheet
         const sheetsToLoad: Array<string | undefined> = nonEmpty.length > 0 ? nonEmpty : [undefined];
-
         for (const sheetName of sheetsToLoad) {
-          const parsedData = await fetchSheetCSV(trimmedUrl, sheetName);
-          const fields = extractFields(parsedData);
-          const tableName = sheetName || 'Sheet1';
-          const table: TableSource = {
-            id: crypto.randomUUID(),
-            name: tableName,
-            data: parsedData,
-            fields,
-            sourceUrl: trimmedUrl,
-            sheetName: sheetName,
-            refreshInterval: selectedInterval,
-            lastUpdated: new Date(),
-          };
-          upsertTable(table);
+          const data = await fetchSheetCSV(trimmed, sheetName);
+          const fields = extractFields(data);
+          upsertTable({
+            id: crypto.randomUUID(), name: sheetName || 'Sheet1',
+            data, fields, sourceUrl: trimmed, sheetName,
+            refreshInterval: selectedInterval, lastUpdated: new Date(),
+          });
         }
+      } else if (isExcel365Url(trimmed)) {
+        const data = await fetchSheetCSV(trimmed);
+        const fields = extractFields(data);
+        const name = new URL(trimmed).pathname.split('/').pop()?.replace(/\?.*/, '') || 'Excel 365';
+        upsertTable({
+          id: crypto.randomUUID(), name,
+          data, fields, sourceUrl: trimmed,
+          refreshInterval: selectedInterval, lastUpdated: new Date(),
+        });
       } else {
-        // Plain CSV URL — single table
-        const parsedData = await fetchSheetCSV(trimmedUrl);
-        const fields = extractFields(parsedData);
-        const tableName = trimmedUrl.split('/').pop()?.split('?')[0] || 'Remote Data';
-        const table: TableSource = {
-          id: crypto.randomUUID(),
-          name: tableName,
-          data: parsedData,
-          fields,
-          sourceUrl: trimmedUrl,
-          refreshInterval: selectedInterval,
-          lastUpdated: new Date(),
-        };
-        upsertTable(table);
+        const data = await fetchSheetCSV(trimmed);
+        const fields = extractFields(data);
+        const name = trimmed.split('/').pop()?.split('?')[0] || 'Remote Data';
+        upsertTable({
+          id: crypto.randomUUID(), name,
+          data, fields, sourceUrl: trimmed,
+          refreshInterval: selectedInterval, lastUpdated: new Date(),
+        });
       }
+      success('Data source connected!');
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Error fetching data from URL');
-    } finally {
-      setLoading(false);
-    }
+      setError(err.message || 'Error fetching data');
+    } finally { setLoading(false); }
   };
 
-  // ── Upload helpers ───────────────────────────────────────────────────────────
-
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  // ── Upload helpers ────────────────────────────────────────────────────────
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
-
-    setUploadedFile(file);
-    setDetectedSheets([]);
-    setSelectedSheets(new Set());
-    setError('');
-
-    if (file.name.match(/\.xlsx?$|\.xls$/i)) {
+    setUploadedFile(file); setDetectedSheets([]); setSelectedSheets(new Set()); setError('');
+    if (file.name.match(/\.xlsx?$|\\.xls$/i)) {
       setDetectingSheets(true);
       try {
         const sheets = await getExcelSheetNames(file);
         setDetectedSheets(sheets);
-        setSelectedSheets(new Set(sheets)); // default: all selected
+        setSelectedSheets(new Set(sheets));
       } catch (err: any) {
         setError(err.message || 'Could not read Excel file.');
-      } finally {
-        setDetectingSheets(false);
-      }
+      } finally { setDetectingSheets(false); }
     }
   };
 
   const toggleSheet = (name: string) => {
     setSelectedSheets(prev => {
       const next = new Set(prev);
-      if (next.has(name)) {
-        next.delete(name);
-      } else {
-        next.add(name);
-      }
+      next.has(name) ? next.delete(name) : next.add(name);
       return next;
     });
   };
 
-  const selectAllSheets = () => setSelectedSheets(new Set(detectedSheets));
-  const deselectAllSheets = () => setSelectedSheets(new Set());
-
   const handleImport = async () => {
     if (!uploadedFile) return;
-    setLoading(true);
-    setError('');
-
+    setLoading(true); setError('');
     try {
       if (uploadedFile.name.endsWith('.csv')) {
-        const parsedData = await parseCSV(uploadedFile);
-        const fields = extractFields(parsedData);
-        const table: TableSource = {
-          id: crypto.randomUUID(),
-          name: uploadedFile.name,
-          data: parsedData,
-          fields,
-          refreshInterval: 0,
-          lastUpdated: new Date(),
-        };
-        upsertTable(table);
-        onClose();
-        return;
+        const data = await parseCSV(uploadedFile);
+        const fields = extractFields(data);
+        upsertTable({ id: crypto.randomUUID(), name: uploadedFile.name, data, fields, refreshInterval: 0, lastUpdated: new Date() });
+        success(`"${uploadedFile.name}" imported!`);
+        onClose(); return;
       }
-
-      if (uploadedFile.name.match(/\.xlsx?$|\.xls$/i)) {
+      if (uploadedFile.name.match(/\.xlsx?$|\\.xls$/i)) {
         const sheetsToImport = Array.from(selectedSheets);
-        if (sheetsToImport.length === 0) {
-          setError('Please select at least one sheet to import.');
-          setLoading(false);
-          return;
-        }
+        if (sheetsToImport.length === 0) { setError('Select at least one sheet.'); setLoading(false); return; }
         for (const sheetName of sheetsToImport) {
-          const parsedData = await parseExcelSheet(uploadedFile, sheetName);
-          const fields = extractFields(parsedData);
-          const table: TableSource = {
-            id: crypto.randomUUID(),
-            name: sheetName,
-            data: parsedData,
-            fields,
-            refreshInterval: 0,
-            lastUpdated: new Date(),
-          };
-          upsertTable(table);
+          const data = await parseExcelSheet(uploadedFile, sheetName);
+          const fields = extractFields(data);
+          upsertTable({ id: crypto.randomUUID(), name: sheetName, data, fields, refreshInterval: 0, lastUpdated: new Date() });
         }
-        onClose();
-        return;
+        success(`${sheetsToImport.length} sheet(s) imported!`);
+        onClose(); return;
       }
-
-      throw new Error('Unsupported file type. Please upload a CSV or Excel file.');
-    } catch (err: any) {
-      setError(err.message || 'Error processing file');
-    } finally {
-      setLoading(false);
-    }
+      throw new Error('Unsupported file type. Use CSV or Excel (.xlsx, .xls).');
+    } catch (err: any) { setError(err.message || 'Error processing file'); }
+    finally { setLoading(false); }
   };
 
-  const isGSheets = isGoogleSheetsUrl(url);
+  const TABS: { id: SourceMode; label: string; icon: any }[] = [
+    { id: 'upload',   label: 'Upload File',     icon: Upload },
+    { id: 'google',   label: 'Google Sheets',   icon: Table2 },
+    { id: 'excel365', label: 'Excel 365',        icon: ExternalLink },
+    { id: 'csv',      label: 'CSV URL',          icon: LinkIcon },
+  ];
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="modal-backdrop">
+      <div className="modal-panel" style={{ maxWidth: 500 }}>
         {/* Header */}
-        <div className="flex justify-between items-center p-4 border-b border-gray-100 shrink-0">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <Database className="w-5 h-5" /> Connect Data Source
-          </h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-md transition-colors">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-base)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="accent-gradient" style={{ width: 30, height: 30, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Database size={15} color="white" />
+            </div>
+            <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>Connect Data Source</span>
+          </div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={16} /></button>
         </div>
 
-        {/* Body */}
-        <div className="p-6 flex flex-col gap-5 overflow-y-auto">
-          {/* Tab switcher */}
-          <div className="flex bg-gray-100 p-1 rounded-lg shrink-0">
-            <button
-              className={`flex-1 py-1.5 px-3 rounded-md text-sm font-medium transition-colors ${mode === 'upload' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-              onClick={() => setMode('upload')}
-            >
-              Upload File
-            </button>
-            <button
-              className={`flex-1 py-1.5 px-3 rounded-md text-sm font-medium transition-colors ${mode === 'url' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-              onClick={() => setMode('url')}
-            >
-              Public URL
-            </button>
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, maxHeight: '75vh', overflowY: 'auto' }}>
+          {/* Tabs */}
+          <div className="tab-bar">
+            {TABS.map(t => (
+              <button key={t.id} className={`tab-item ${mode === t.id ? 'active' : ''}`} onClick={() => setMode(t.id)}
+                style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <t.icon size={12} />{t.label}
+              </button>
+            ))}
           </div>
 
-          {/* ── Upload tab ──────────────────────────────────────────────────── */}
+          {/* ── Upload ─────────────────────────────────────────────────── */}
           {mode === 'upload' && (
             <>
-              <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:bg-gray-50 transition-colors cursor-pointer relative">
-                <input
-                  type="file"
-                  accept=".csv, .xlsx, .xls"
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  onChange={handleFileChange}
-                />
-                <Upload className="w-8 h-8 text-gray-400 mb-3" />
+              <div style={{
+                border: '2px dashed var(--border-strong)', borderRadius: 12,
+                padding: '32px 16px', textAlign: 'center', position: 'relative',
+                cursor: 'pointer', transition: 'all 180ms',
+                background: 'var(--bg-surface2)',
+              }}>
+                <input type="file" accept=".csv,.xlsx,.xls" style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} onChange={handleFileChange} />
+                <Upload size={28} style={{ color: 'var(--text-muted)', marginBottom: 10 }} />
                 {uploadedFile ? (
                   <>
-                    <p className="font-medium text-gray-700 mb-1 truncate max-w-full px-4">{uploadedFile.name}</p>
-                    <p className="text-xs text-gray-500">Click to change file</p>
+                    <p style={{ fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 4px' }}>{uploadedFile.name}</p>
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Click to change</p>
                   </>
                 ) : (
                   <>
-                    <p className="font-medium text-gray-700 mb-1">Click or drag file to this area to upload</p>
-                    <p className="text-xs text-gray-500">Supports CSV or Excel (.xlsx, .xls) files.</p>
+                    <p style={{ fontWeight: 600, color: 'var(--text-secondary)', margin: '0 0 4px' }}>Drop file or click to browse</p>
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>CSV, Excel (.xlsx, .xls)</p>
                   </>
                 )}
               </div>
 
-              {/* Sheet selector for Excel */}
               {detectingSheets && (
-                <div className="text-center text-sm text-gray-500 flex items-center justify-center gap-2">
-                  <RefreshCw className="w-4 h-4 animate-spin" /> Detecting sheets…
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)', fontSize: 13 }}>
+                  <RefreshCw size={14} className="animate-spin-slow" /> Detecting sheets…
                 </div>
               )}
 
               {detectedSheets.length > 0 && !detectingSheets && (
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-gray-700">
-                      Sheets to import ({selectedSheets.size} of {detectedSheets.length} selected)
-                    </label>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={selectAllSheets}
-                        className="text-xs text-blue-600 hover:underline font-medium"
-                      >
-                        Select All
-                      </button>
-                      <span className="text-xs text-gray-300">|</span>
-                      <button
-                        onClick={deselectAllSheets}
-                        className="text-xs text-blue-600 hover:underline font-medium"
-                      >
-                        Deselect All
-                      </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label className="form-label" style={{ margin: 0 }}>Sheets ({selectedSheets.size}/{detectedSheets.length})</label>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => setSelectedSheets(new Set(detectedSheets))} style={{ fontSize: 11, color: 'var(--color-accent)', background: 'none', border: 'none', cursor: 'pointer' }}>All</button>
+                      <button onClick={() => setSelectedSheets(new Set())} style={{ fontSize: 11, color: 'var(--color-accent)', background: 'none', border: 'none', cursor: 'pointer' }}>None</button>
                     </div>
                   </div>
-                  <div className="flex flex-col gap-1.5 max-h-44 overflow-y-auto pr-1">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 160, overflowY: 'auto' }}>
                     {detectedSheets.map(name => (
-                      <label
-                        key={name}
-                        className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedSheets.has(name)}
-                          onChange={() => toggleSheet(name)}
-                          className="accent-blue-600 w-4 h-4 shrink-0"
-                        />
-                        <span className="text-sm text-gray-700 truncate">{name}</span>
+                      <label key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border-base)', cursor: 'pointer', fontSize: 13, color: 'var(--text-primary)' }}>
+                        <input type="checkbox" checked={selectedSheets.has(name)} onChange={() => toggleSheet(name)} style={{ accentColor: 'var(--color-accent)' }} />
+                        {name}
                       </label>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Import button (only shown once a file is chosen) */}
               {uploadedFile && !detectingSheets && (
-                <button
-                  onClick={handleImport}
-                  disabled={loading}
-                  className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg shadow-sm text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                <button onClick={handleImport} disabled={loading} className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>
+                  {loading ? <RefreshCw size={14} className="animate-spin-slow" /> : <Upload size={14} />}
                   {loading ? 'Importing…' : 'Import'}
                 </button>
               )}
             </>
           )}
 
-          {/* ── URL tab ─────────────────────────────────────────────────────── */}
-          {mode === 'url' && (
-            <div className="flex flex-col gap-4">
-              {/* URL input */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium text-gray-700">Google Sheets or CSV Public URL</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                    <LinkIcon className="w-4 h-4 text-gray-400" />
-                  </div>
-                  <input
-                    type="url"
-                    placeholder="https://docs.google.com/spreadsheets/d/..."
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                  />
-                </div>
+          {/* ── Google Sheets ──────────────────────────────────────────── */}
+          {mode === 'google' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label className="form-label">Google Sheets URL</label>
+                <input className="form-input" type="url" placeholder="https://docs.google.com/spreadsheets/d/..." value={url} onChange={e => setUrl(e.target.value)} />
               </div>
-
-              {/* Sheet names section — only for Google Sheets URLs */}
-              {isGSheets && (
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-gray-700">Sheet Names</label>
-                    <button
-                      type="button"
-                      onClick={addSheetNameInput}
-                      className="flex items-center gap-1 text-xs text-blue-600 hover:underline font-medium"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Add sheet
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <label className="form-label" style={{ margin: 0 }}>Sheet Names (optional)</label>
+                  <button onClick={() => setSheetNames(p => [...p, ''])} style={{ fontSize: 11, color: 'var(--color-accent)', background: 'none', border: 'none', cursor: 'pointer' }}>
+                    <Plus size={11} style={{ display: 'inline' }} /> Add sheet
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>Each sheet loads as a separate table. Leave blank for default sheet.</p>
+                {sheetNames.map((name, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                    <input className="form-input" placeholder={`Sheet ${idx + 1}`} value={name} onChange={e => setSheetNames(p => p.map((s, i) => i === idx ? e.target.value : s))} />
+                    <button className="btn btn-ghost btn-icon" onClick={() => setSheetNames(p => { const n = p.filter((_, i) => i !== idx); return n.length ? n : ['']; })} disabled={sheetNames.length === 1}>
+                      <Trash2 size={13} />
                     </button>
                   </div>
-                  <p className="text-xs text-gray-500 -mt-1">
-                    Enter sheet names exactly as they appear in the spreadsheet. Each sheet loads as a separate table.
-                  </p>
-                  <div className="flex flex-col gap-2 max-h-44 overflow-y-auto pr-1">
-                    {sheetNames.map((name, idx) => (
-                      <div key={idx} className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder={`Sheet name ${idx + 1}`}
-                          value={name}
-                          onChange={(e) => updateSheetName(idx, e.target.value)}
-                          className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeSheetNameInput(idx)}
-                          disabled={sheetNames.length === 1}
-                          className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                          title="Remove sheet"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Auto-refresh */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
-                  <RefreshCw className="w-3.5 h-3.5" /> Auto-Refresh Interval
-                </label>
-                <select
-                  value={selectedInterval}
-                  onChange={(e) => setSelectedInterval(Number(e.target.value) as RefreshInterval)}
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                >
-                  {REFRESH_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
+                ))}
               </div>
-
-              <p className="text-xs text-gray-500">
-                For Google Sheets, set "General access" to "Anyone with the link" before connecting.
+              <AutoRefreshSelect value={selectedInterval} onChange={setSelectedInterval} />
+              <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                Set Google Sheets access to <strong>"Anyone with the link"</strong> before connecting.
               </p>
-
-              <button
-                onClick={handleUrlConnect}
-                disabled={!url.trim() || loading}
-                className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg shadow-sm text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
-                {loading ? 'Connecting…' : 'Connect'}
+              <button onClick={handleUrlConnect} disabled={!url.trim() || loading} className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>
+                {loading ? <RefreshCw size={14} className="animate-spin-slow" /> : <Database size={14} />}
+                {loading ? 'Connecting…' : 'Connect Google Sheets'}
               </button>
             </div>
           )}
 
-          {/* Error / loading feedback */}
-          {error && (
-            <div className="p-3 bg-red-50 text-red-700 text-sm border border-red-200 rounded-md">
-              {error}
+          {/* ── Excel 365 ─────────────────────────────────────────────── */}
+          {mode === 'excel365' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ padding: 12, background: 'var(--bg-active)', borderRadius: 8, border: '1px solid rgba(99,102,241,0.2)', fontSize: 12, color: 'var(--text-secondary)' }}>
+                <p style={{ margin: '0 0 6px', fontWeight: 600, color: 'var(--color-accent)' }}>📊 Excel 365 / OneDrive / SharePoint</p>
+                <ol style={{ margin: 0, paddingLeft: 16, lineHeight: 1.8 }}>
+                  <li>Open your Excel file in Office 365 online</li>
+                  <li>Click <strong>Share → Copy link</strong></li>
+                  <li>Set permission to <strong>"Anyone with the link can view"</strong></li>
+                  <li>Paste the share URL below</li>
+                </ol>
+              </div>
+              <div>
+                <label className="form-label">OneDrive / SharePoint Share URL</label>
+                <input className="form-input" type="url" placeholder="https://1drv.ms/x/... or https://company.sharepoint.com/..." value={url} onChange={e => setUrl(e.target.value)} />
+              </div>
+              <AutoRefreshSelect value={selectedInterval} onChange={setSelectedInterval} />
+              <button onClick={handleUrlConnect} disabled={!url.trim() || loading} className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>
+                {loading ? <RefreshCw size={14} className="animate-spin-slow" /> : <ExternalLink size={14} />}
+                {loading ? 'Connecting…' : 'Connect Excel 365'}
+              </button>
             </div>
           )}
 
-          {loading && (
-            <div className="text-center text-sm text-gray-500 flex items-center justify-center gap-2">
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              Processing data…
+          {/* ── CSV URL ────────────────────────────────────────────────── */}
+          {mode === 'csv' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label className="form-label">Public CSV URL</label>
+                <input className="form-input" type="url" placeholder="https://example.com/data.csv" value={url} onChange={e => setUrl(e.target.value)} />
+              </div>
+              <AutoRefreshSelect value={selectedInterval} onChange={setSelectedInterval} />
+              <button onClick={handleUrlConnect} disabled={!url.trim() || loading} className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>
+                {loading ? <RefreshCw size={14} className="animate-spin-slow" /> : <LinkIcon size={14} />}
+                {loading ? 'Fetching…' : 'Connect CSV'}
+              </button>
+            </div>
+          )}
+
+          {error && (
+            <div style={{ padding: '10px 14px', background: 'rgba(239,68,68,0.08)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, fontSize: 13 }}>
+              {error}
             </div>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function AutoRefreshSelect({ value, onChange }: { value: RefreshInterval; onChange: (v: RefreshInterval) => void }) {
+  return (
+    <div>
+      <label className="form-label">Auto-Refresh</label>
+      <select className="form-select" value={value} onChange={e => onChange(Number(e.target.value) as RefreshInterval)}>
+        {REFRESH_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+      </select>
     </div>
   );
 }

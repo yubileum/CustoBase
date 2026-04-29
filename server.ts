@@ -65,7 +65,7 @@ async function startServer() {
       return res.status(503).json({ error: 'AI not configured. Add GEMINI_API_KEY to your .env file.' });
     }
 
-    const { message, fields, charts, dataSample } = req.body;
+    const { message, fields, charts, dataSample, allTables } = req.body;
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ error: '"message" is required' });
     }
@@ -81,11 +81,12 @@ async function startServer() {
             type: Type.OBJECT,
             properties: {
               title:        { type: Type.STRING, description: 'Chart title.' },
-              type:         { type: Type.STRING, description: 'Chart type: Bar, Line, Pie, Scatter, Table, or Card.' },
-              xAxisField:   { type: Type.STRING, description: 'X-axis field (or name field for Pie). Omit for Card.' },
+              type:         { type: Type.STRING, description: 'Chart type: Bar, Line, Area, Pie, Donut, Scatter, Table, or Card.' },
+              xAxisField:   { type: Type.STRING, description: 'X-axis field (or name field for Pie/Donut). Omit for Card.' },
               yAxisField:   { type: Type.STRING, description: 'Y-axis / value / metric field.' },
               aggregation:  { type: Type.STRING, description: 'Aggregation: sum, count, avg, max, min. Default: sum.' },
               colSpan:      { type: Type.NUMBER, description: 'Grid width: 1 (1/3), 2 (2/3), 3 (full). Default: 1.' },
+              tableId:      { type: Type.STRING, description: 'ID of the data table to use. Use the id from allTables.' },
             },
             required: ['title', 'type'],
           },
@@ -98,7 +99,7 @@ async function startServer() {
             properties: {
               id:           { type: Type.STRING, description: 'ID of the chart to update.' },
               title:        { type: Type.STRING },
-              type:         { type: Type.STRING, description: 'Chart type: Bar, Line, Pie, Scatter, Table, or Card.' },
+              type:         { type: Type.STRING, description: 'Chart type: Bar, Line, Area, Pie, Donut, Scatter, Table, or Card.' },
               xAxisField:   { type: Type.STRING },
               yAxisField:   { type: Type.STRING },
               aggregation:  { type: Type.STRING },
@@ -109,11 +110,18 @@ async function startServer() {
         },
       ];
 
-      const systemInstruction = `You are a data visualization assistant.
-Available fields: ${Array.isArray(fields) ? fields.join(', ') : 'none'}.
-Data sample (first row): ${JSON.stringify(dataSample ?? {})}.
-Current charts: ${JSON.stringify(charts ?? [])}.
-Use the provided tools to create or modify charts. Respond briefly and confirm what you did.`;
+      const tablesSummary = Array.isArray(allTables)
+        ? allTables.map((t: any) => `Table "${t.name}" (id: ${t.id}): fields [${t.fields?.join(', ')}]`).join('\n')
+        : `Active table fields: ${Array.isArray(fields) ? fields.join(', ') : 'none'}`;
+
+      const systemInstruction = `You are a data visualization assistant for CustoBase dashboard.
+All available data tables:
+${tablesSummary}
+
+Active table sample row: ${JSON.stringify(dataSample ?? {})}.
+Current charts on dashboard: ${JSON.stringify(charts ?? [])}.
+Use the provided tools to create or modify charts. When the user mentions a specific table by name, use its id in the tableId field.
+Respond briefly and confirm what you did.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-2.0-flash',

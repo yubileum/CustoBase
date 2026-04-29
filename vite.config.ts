@@ -89,7 +89,7 @@ function apiPlugin() {
               res.writeHead(503, { 'Content-Type': 'application/json' });
               return res.end(JSON.stringify({ error: 'AI not configured. Add GEMINI_API_KEY to your .env file.' }));
             }
-            const { message, fields, charts, dataSample } = JSON.parse(body);
+            const { message, fields, charts, dataSample, allTables } = JSON.parse(body);
             if (!message || typeof message !== 'string') {
               res.writeHead(400, { 'Content-Type': 'application/json' });
               return res.end(JSON.stringify({ error: '"message" is required' }));
