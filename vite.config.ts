@@ -78,6 +78,34 @@ function apiPlugin() {
         });
       });
 
+      server.middlewares.use('/api/proxy-file', (req: any, res: any, next: any) => {
+        if (req.method !== 'GET') { next(); return; }
+        (async () => {
+          const urlParam = new URL(req.url!, 'http://localhost').searchParams.get('url') ?? '';
+          if (!urlParam) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ error: 'Missing url parameter' }));
+          }
+          if (!isUrlAllowed(urlParam)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ error: 'URL not allowed.' }));
+          }
+          const upstream = await fetch(urlParam);
+          if (!upstream.ok) {
+            res.writeHead(upstream.status, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ error: `Upstream error: ${upstream.status}` }));
+          }
+          const arrayBuffer = await upstream.arrayBuffer();
+          res.writeHead(200, {
+            'Content-Type': upstream.headers.get('content-type') || 'application/octet-stream'
+          });
+          res.end(Buffer.from(arrayBuffer));
+        })().catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message || 'Proxy error' }));
+        });
+      });
+
       server.middlewares.use('/api/ai-chat', (req: any, res: any, next: any) => {
         if (req.method !== 'POST') { next(); return; }
         let body = '';
@@ -103,12 +131,12 @@ function apiPlugin() {
                 parameters: {
                   type: Type.OBJECT,
                   properties: {
-                    title:       { type: Type.STRING, description: 'Chart title.' },
-                    type:        { type: Type.STRING, description: 'Chart type: Bar, Line, Pie, Scatter, Table, or Card.' },
-                    xAxisField:  { type: Type.STRING, description: 'X-axis field (or name field for Pie). Omit for Card.' },
-                    yAxisField:  { type: Type.STRING, description: 'Y-axis / value / metric field.' },
+                    title: { type: Type.STRING, description: 'Chart title.' },
+                    type: { type: Type.STRING, description: 'Chart type: Bar, Line, Pie, Scatter, Table, or Card.' },
+                    xAxisField: { type: Type.STRING, description: 'X-axis field (or name field for Pie). Omit for Card.' },
+                    yAxisField: { type: Type.STRING, description: 'Y-axis / value / metric field.' },
                     aggregation: { type: Type.STRING, description: 'Aggregation: sum, count, avg, max, min. Default: sum.' },
-                    colSpan:     { type: Type.NUMBER, description: 'Grid width: 1 (1/3), 2 (2/3), 3 (full). Default: 1.' },
+                    colSpan: { type: Type.NUMBER, description: 'Grid width: 1 (1/3), 2 (2/3), 3 (full). Default: 1.' },
                   },
                   required: ['title', 'type'],
                 },
@@ -119,13 +147,13 @@ function apiPlugin() {
                 parameters: {
                   type: Type.OBJECT,
                   properties: {
-                    id:          { type: Type.STRING, description: 'ID of the chart to update.' },
-                    title:       { type: Type.STRING },
-                    type:        { type: Type.STRING, description: 'Chart type: Bar, Line, Pie, Scatter, Table, or Card.' },
-                    xAxisField:  { type: Type.STRING },
-                    yAxisField:  { type: Type.STRING },
+                    id: { type: Type.STRING, description: 'ID of the chart to update.' },
+                    title: { type: Type.STRING },
+                    type: { type: Type.STRING, description: 'Chart type: Bar, Line, Pie, Scatter, Table, or Card.' },
+                    xAxisField: { type: Type.STRING },
+                    yAxisField: { type: Type.STRING },
                     aggregation: { type: Type.STRING },
-                    colSpan:     { type: Type.NUMBER },
+                    colSpan: { type: Type.NUMBER },
                   },
                   required: ['id'],
                 },

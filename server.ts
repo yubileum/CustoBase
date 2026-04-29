@@ -58,6 +58,23 @@ async function startServer() {
     }
   });
 
+  // ── File proxy (for binary data like Excel files) ──────────────────────────
+  app.get('/api/proxy-file', async (req, res) => {
+    const url = req.query.url as string;
+    if (!url) return res.status(400).json({ error: 'Missing url parameter' });
+    if (!isUrlAllowed(url)) return res.status(400).json({ error: 'URL not allowed.' });
+    try {
+      const upstream = await fetch(url);
+      if (!upstream.ok) return res.status(upstream.status).json({ error: `Upstream error: ${upstream.status}` });
+      const arrayBuffer = await upstream.arrayBuffer();
+      res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/octet-stream');
+      res.send(Buffer.from(arrayBuffer));
+    } catch (err: any) {
+      console.error('Proxy file error:', err);
+      res.status(500).json({ error: err.message || 'Proxy error' });
+    }
+  });
+
   // ── AI chat (Gemini – server-side, key never reaches the browser) ──────────
   app.post('/api/ai-chat', async (req, res) => {
     const apiKey = process.env.GEMINI_API_KEY;

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useData, RefreshInterval, TableSource } from '../lib/DataContext';
-import { isExcel365Url, parseCSV, parseExcelSheet, getExcelSheetNames, fetchSheetCSV, extractFields } from '../lib/dataUtils';
+import { isExcel365Url, parseCSV, parseExcelSheet, getExcelSheetNames, fetchSheetCSV, extractFields, fetchGoogleSheetNames, fetchExcel365SheetNames } from '../lib/dataUtils';
 import { Upload, Link as LinkIcon, Database, X, RefreshCw, Plus, Trash2, Table2, ExternalLink } from 'lucide-react';
 import { useToast } from '../lib/ToastContext';
 
@@ -38,33 +38,69 @@ export default function DataSourceModal({ onClose }: Props) {
   const [selectedSheets, setSelectedSheets] = useState<Set<string>>(new Set());
   const [detectingSheets, setDetectingSheets] = useState(false);
 
+  // Available sheets from URL
+  const [availableSheets, setAvailableSheets] = useState<string[]>([]);
+  const [fetchingSheets, setFetchingSheets] = useState(false);
+
+  React.useEffect(() => {
+    const trimmed = url.trim();
+    if (mode === 'google' && isGoogleSheetsUrl(trimmed)) {
+      setFetchingSheets(true);
+      fetchGoogleSheetNames(trimmed)
+        .then(sheets => {
+           setAvailableSheets(sheets);
+           if (sheets.length > 0 && sheetNames.length === 1 && sheetNames[0] === '') {
+             setSheetNames(['*']);
+           }
+        })
+        .catch(() => setAvailableSheets([]))
+        .finally(() => setFetchingSheets(false));
+    } else if (mode === 'excel365' && isExcel365Url(trimmed)) {
+      setFetchingSheets(true);
+      fetchExcel365SheetNames(trimmed)
+        .then(sheets => {
+           setAvailableSheets(sheets);
+           if (sheets.length > 0 && sheetNames.length === 1 && sheetNames[0] === '') {
+             setSheetNames(['*']);
+           }
+        })
+        .catch(() => setAvailableSheets([]))
+        .finally(() => setFetchingSheets(false));
+    } else {
+      setAvailableSheets([]);
+    }
+  }, [url, mode]);
+
   // ── URL helpers ───────────────────────────────────────────────────────────
   const handleUrlConnect = async () => {
     const trimmed = url.trim();
     if (!trimmed) return;
     setLoading(true); setError('');
     try {
-      if (isGoogleSheetsUrl(trimmed)) {
+      if (isGoogleSheetsUrl(trimmed) || isExcel365Url(trimmed)) {
         const nonEmpty = sheetNames.map(s => s.trim()).filter(Boolean);
-        const sheetsToLoad: Array<string | undefined> = nonEmpty.length > 0 ? nonEmpty : [undefined];
+        let sheetsToLoad: Array<string | undefined> = nonEmpty.length > 0 ? nonEmpty : [undefined];
+
+        if (sheetsToLoad.includes('*') && availableSheets.length > 0) {
+          sheetsToLoad = Array.from(new Set([
+            ...sheetsToLoad.filter(s => s !== '*'),
+            ...availableSheets
+          ]));
+        }
+
         for (const sheetName of sheetsToLoad) {
           const data = await fetchSheetCSV(trimmed, sheetName);
           const fields = extractFields(data);
+          let defaultName = 'Data';
+          if (isGoogleSheetsUrl(trimmed)) defaultName = sheetName || 'Sheet1';
+          else defaultName = sheetName || new URL(trimmed).pathname.split('/').pop()?.replace(/\?.*/, '') || 'Excel 365';
+
           upsertTable({
-            id: crypto.randomUUID(), name: sheetName || 'Sheet1',
+            id: crypto.randomUUID(), name: defaultName,
             data, fields, sourceUrl: trimmed, sheetName,
             refreshInterval: selectedInterval, lastUpdated: new Date(),
           });
         }
-      } else if (isExcel365Url(trimmed)) {
-        const data = await fetchSheetCSV(trimmed);
-        const fields = extractFields(data);
-        const name = new URL(trimmed).pathname.split('/').pop()?.replace(/\?.*/, '') || 'Excel 365';
-        upsertTable({
-          id: crypto.randomUUID(), name,
-          data, fields, sourceUrl: trimmed,
-          refreshInterval: selectedInterval, lastUpdated: new Date(),
-        });
       } else {
         const data = await fetchSheetCSV(trimmed);
         const fields = extractFields(data);
@@ -234,7 +270,10 @@ export default function DataSourceModal({ onClose }: Props) {
               </div>
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <label className="form-label" style={{ margin: 0 }}>Sheet Names (optional)</label>
+                  <label className="form-label" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    Sheet Names (optional)
+                    {fetchingSheets && <RefreshCw size={12} className="animate-spin-slow" style={{ color: 'var(--text-muted)' }} />}
+                  </label>
                   <button onClick={() => setSheetNames(p => [...p, ''])} style={{ fontSize: 11, color: 'var(--color-accent)', background: 'none', border: 'none', cursor: 'pointer' }}>
                     <Plus size={11} style={{ display: 'inline' }} /> Add sheet
                   </button>
@@ -242,7 +281,14 @@ export default function DataSourceModal({ onClose }: Props) {
                 <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>Each sheet loads as a separate table. Leave blank for default sheet.</p>
                 {sheetNames.map((name, idx) => (
                   <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                    <input className="form-input" placeholder={`Sheet ${idx + 1}`} value={name} onChange={e => setSheetNames(p => p.map((s, i) => i === idx ? e.target.value : s))} />
+                    {availableSheets.length > 0 ? (
+                      <select className="form-select" value={name} onChange={e => setSheetNames(p => p.map((s, i) => i === idx ? e.target.value : s))} style={{ flex: 1 }}>
+                        <option value="*">All</option>
+                        {availableSheets.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    ) : (
+                      <input className="form-input" placeholder={`Sheet ${idx + 1}`} value={name} onChange={e => setSheetNames(p => p.map((s, i) => i === idx ? e.target.value : s))} />
+                    )}
                     <button className="btn btn-ghost btn-icon" onClick={() => setSheetNames(p => { const n = p.filter((_, i) => i !== idx); return n.length ? n : ['']; })} disabled={sheetNames.length === 1}>
                       <Trash2 size={13} />
                     </button>
@@ -275,6 +321,33 @@ export default function DataSourceModal({ onClose }: Props) {
               <div>
                 <label className="form-label">OneDrive / SharePoint Share URL</label>
                 <input className="form-input" type="url" placeholder="https://1drv.ms/x/... or https://company.sharepoint.com/..." value={url} onChange={e => setUrl(e.target.value)} />
+              </div>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <label className="form-label" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    Sheet Names (optional)
+                    {fetchingSheets && <RefreshCw size={12} className="animate-spin-slow" style={{ color: 'var(--text-muted)' }} />}
+                  </label>
+                  <button onClick={() => setSheetNames(p => [...p, ''])} style={{ fontSize: 11, color: 'var(--color-accent)', background: 'none', border: 'none', cursor: 'pointer' }}>
+                    <Plus size={11} style={{ display: 'inline' }} /> Add sheet
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>Each sheet loads as a separate table. Leave blank for default sheet.</p>
+                {sheetNames.map((name, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                    {availableSheets.length > 0 ? (
+                      <select className="form-select" value={name} onChange={e => setSheetNames(p => p.map((s, i) => i === idx ? e.target.value : s))} style={{ flex: 1 }}>
+                        <option value="*">All</option>
+                        {availableSheets.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    ) : (
+                      <input className="form-input" placeholder={`Sheet ${idx + 1}`} value={name} onChange={e => setSheetNames(p => p.map((s, i) => i === idx ? e.target.value : s))} />
+                    )}
+                    <button className="btn btn-ghost btn-icon" onClick={() => setSheetNames(p => { const n = p.filter((_, i) => i !== idx); return n.length ? n : ['']; })} disabled={sheetNames.length === 1}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
               </div>
               <AutoRefreshSelect value={selectedInterval} onChange={setSelectedInterval} />
               <button onClick={handleUrlConnect} disabled={!url.trim() || loading} className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>

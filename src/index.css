@@ -373,6 +373,26 @@ body {
 .dash-card:hover .drag-handle { opacity: 1; }
 .dragging .drag-handle { opacity: 1; }
 
+/* ── Resize handle ──────────────────────────────────────────────────────── */
+.resize-handle {
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.group:hover .resize-handle {
+  opacity: 1;
+  transform: scale(1);
+}
+.resize-handle:active {
+  transform: scale(0.94);
+}
+
+/* Also keep dash-card hover effects on the inner card */
+.dash-card:hover {
+  box-shadow: var(--card-shadow-hover);
+  border-color: var(--border-strong);
+}
+
 /* ── Toast ──────────────────────────────────────────────────────────────── */
 .toast-item {
   display: flex;

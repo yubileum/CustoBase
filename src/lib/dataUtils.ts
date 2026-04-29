@@ -143,6 +143,14 @@ export async function fetchSheetCSV(url: string, sheetName?: string): Promise<Da
     fetchUrl = buildGoogleSheetsUrl(url, sheetName);
   } else if (isExcel365Url(url)) {
     fetchUrl = buildExcel365CsvUrl(url);
+    const proxyUrl = `/api/proxy-file?url=${encodeURIComponent(fetchUrl)}`;
+    const response = await fetch(proxyUrl);
+    if (!response.ok) throw new Error(`Failed to fetch Excel 365 data: ${response.statusText}`);
+    const buffer = await response.arrayBuffer();
+    const wb = XLSX.read(buffer, { type: 'array' });
+    const ws = wb.Sheets[sheetName || wb.SheetNames[0]];
+    if (!ws) throw new Error(`Sheet "${sheetName}" not found in Excel file.`);
+    return XLSX.utils.sheet_to_json(ws);
   } else if (url.includes('/pub?')) {
     fetchUrl = url.includes('output=csv') ? url : url.replace(/pub\?.*/, 'pub?output=csv');
   } else {
@@ -151,6 +159,33 @@ export async function fetchSheetCSV(url: string, sheetName?: string): Promise<Da
 
   const text = await fetchCsvText(fetchUrl);
   return parseCsvText(text);
+}
+
+export async function fetchGoogleSheetNames(url: string): Promise<string[]> {
+  const id = extractGoogleSheetsId(url);
+  if (!id) throw new Error('Invalid Google Sheets URL');
+  const fetchUrl = `https://docs.google.com/spreadsheets/d/${id}/htmlview`;
+  const proxyUrl = `/api/proxy-csv?url=${encodeURIComponent(fetchUrl)}`;
+  const response = await fetch(proxyUrl);
+  if (!response.ok) throw new Error('Failed to fetch Google Sheets HTML');
+  const html = await response.text();
+  const sheetNames = [];
+  const regex = /name:\s*"([^"]+)",\s*pageUrl:/g;
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    sheetNames.push(m[1]);
+  }
+  return [...new Set(sheetNames)];
+}
+
+export async function fetchExcel365SheetNames(url: string): Promise<string[]> {
+  const fetchUrl = buildExcel365CsvUrl(url);
+  const proxyUrl = `/api/proxy-file?url=${encodeURIComponent(fetchUrl)}`;
+  const response = await fetch(proxyUrl);
+  if (!response.ok) throw new Error('Failed to fetch Excel 365 file');
+  const buffer = await response.arrayBuffer();
+  const wb = XLSX.read(buffer, { type: 'array' });
+  return wb.SheetNames;
 }
 
 export const fetchPublicCSV = (url: string): Promise<DataRow[]> => fetchSheetCSV(url);

@@ -74,6 +74,8 @@ interface DataContextType {
 
 const STORAGE_KEY_V2 = 'custobase_v2';
 const STORAGE_KEY_V1 = 'custobase_v1';
+const DATA_KEY_PREFIX = 'custobase_data_';
+const DATA_SIZE_LIMIT = 5 * 1024 * 1024; // 5 MB per table
 
 interface PersistedTable {
   id: string;
@@ -81,12 +83,33 @@ interface PersistedTable {
   sourceUrl?: string;
   sheetName?: string;
   refreshInterval: RefreshInterval;
+  hasData?: boolean; // whether data rows were persisted
 }
 interface PersistedState {
   activeTableId: string;
   tables: PersistedTable[];
   charts: ChartConfig[];
   relations: Relation[];
+}
+
+function saveTableData(id: string, data: any[]) {
+  try {
+    const serialised = JSON.stringify(data);
+    if (serialised.length > DATA_SIZE_LIMIT) return false;
+    localStorage.setItem(DATA_KEY_PREFIX + id, serialised);
+    return true;
+  } catch { return false; }
+}
+
+function loadTableData(id: string): any[] | null {
+  try {
+    const raw = localStorage.getItem(DATA_KEY_PREFIX + id);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function removeTableData(id: string) {
+  try { localStorage.removeItem(DATA_KEY_PREFIX + id); } catch {}
 }
 
 function saveState(state: PersistedState) {
@@ -122,11 +145,19 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
   const [tables, setTables] = useState<TableSource[]>(() => {
     if (!stored?.tables?.length) return [];
-    return stored.tables.map(t => ({
-      id: t.id, name: t.name, data: [], fields: [],
-      sourceUrl: t.sourceUrl, sheetName: t.sheetName,
-      refreshInterval: t.refreshInterval, lastUpdated: null,
-    }));
+    return stored.tables.map(t => {
+      const savedData = loadTableData(t.id);
+      const data = savedData ?? [];
+      const fields = data.length > 0
+        ? Array.from(new Set(data.flatMap(row => Object.keys(row)).filter(k => k?.trim() !== '')))
+        : [];
+      return {
+        id: t.id, name: t.name, data, fields,
+        sourceUrl: t.sourceUrl, sheetName: t.sheetName,
+        refreshInterval: t.refreshInterval,
+        lastUpdated: data.length > 0 ? new Date() : null,
+      };
+    });
   });
 
   const [activeTableId, setActiveTableIdState] = useState<string>(stored?.activeTableId ?? '');
@@ -135,10 +166,14 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
-    const persistedTables: PersistedTable[] = tables.map(t => ({
-      id: t.id, name: t.name, sourceUrl: t.sourceUrl,
-      sheetName: t.sheetName, refreshInterval: t.refreshInterval,
-    }));
+    const persistedTables: PersistedTable[] = tables.map(t => {
+      const saved = saveTableData(t.id, t.data);
+      return {
+        id: t.id, name: t.name, sourceUrl: t.sourceUrl,
+        sheetName: t.sheetName, refreshInterval: t.refreshInterval,
+        hasData: saved && t.data.length > 0,
+      };
+    });
     saveState({ activeTableId, tables: persistedTables, charts, relations });
   }, [tables, activeTableId, charts, relations]);
 
@@ -154,6 +189,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
   // ✅ FIX: removeTable stale closure — use functional updater for all state
   const removeTable = (id: string) => {
+    removeTableData(id); // clean up persisted data
     setTables(prev => {
       const next = prev.filter(t => t.id !== id);
       // derive new active from updated list

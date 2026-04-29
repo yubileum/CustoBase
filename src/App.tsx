@@ -50,7 +50,7 @@ function AppContent() {
     }
   }, [updateTableData, toastError]);
 
-  // Restore data on mount
+  // Re-fetch on mount only for URL-backed tables whose data wasn't cached in localStorage
   useEffect(() => {
     const toRestore = tables.filter(t => t.sourceUrl && t.data.length === 0);
     if (toRestore.length === 0) return;
