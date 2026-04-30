@@ -4,11 +4,18 @@ export type ChartType = 'Bar' | 'Line' | 'Area' | 'Pie' | 'Donut' | 'Scatter' | 
 export type RefreshInterval = 0 | 30 | 60 | 300 | 900 | 1800;
 export type RelationType = 'one-to-one' | 'one-to-many' | 'many-to-many';
 
+export interface PivotValue {
+  field: string;
+  aggregation: 'sum' | 'count' | 'avg' | 'min' | 'max';
+  label?: string;
+}
+
 export interface ChartConfig {
   id: string;
   type: ChartType;
   title: string;
   tableId?: string;
+  // Legacy single-field config
   xAxisLabel?: string;
   yAxisLabel?: string;
   xAxisField?: string;
@@ -19,6 +26,29 @@ export interface ChartConfig {
   colSpan?: 1 | 2 | 3;
   colorScheme?: string;
   showLegend?: boolean;
+  // Pivot / advanced config
+  pivotRows?: string[];       // row grouping fields
+  pivotColumns?: string[];    // column grouping fields (for pivot table)
+  pivotValues?: PivotValue[]; // value/metric fields with aggregation
+  // Column visibility (Table type)
+  visibleColumns?: string[];  // if set, only show these columns
+  // Sort
+  sortField?: string;
+  sortDir?: 'asc' | 'desc';
+  // Top N limit
+  topN?: number;
+  // Multi-series y-fields (Bar/Line/Area)
+  yFields?: string[];
+  // Bar mode
+  barMode?: 'grouped' | 'stacked';
+  // Reference line
+  refLineValue?: number;
+  refLineLabel?: string;
+  // Table options
+  tablePageSize?: number;
+  tableSearch?: boolean;
+  // Show data labels on charts
+  showDataLabels?: boolean;
 }
 
 export interface TableSource {

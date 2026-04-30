@@ -167,7 +167,7 @@ Current charts: ${JSON.stringify(charts ?? [])}.
 Use the provided tools to create or modify charts. Respond briefly and confirm what you did.`;
 
             const response = await ai.models.generateContent({
-              model: 'gemini-1.5-flash',
+              model: 'gemini-2.0-flash',
               contents: message,
               config: {
                 systemInstruction,
